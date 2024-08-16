@@ -3,26 +3,51 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"time"
 )
 
 type DistributedCache struct {
-	hashring *HashRing
-	nodes    map[string]*CacheNode
+	hashring          *HashRing
+	nodes             map[string]*CacheNode
+	activeNodes       map[string]bool
+	heartbeatListener chan string
 }
 
 func NewDistributedCache() *DistributedCache {
 	return &DistributedCache{
-		hashring: NewHashRing(3),
-		nodes:    make(map[string]*CacheNode),
+		hashring:          NewHashRing(3),
+		nodes:             make(map[string]*CacheNode),
+		activeNodes:       make(map[string]bool),
+		heartbeatListener: make(chan string),
+	}
+}
+
+func (dc *DistributedCache) ListenToHeartbeat() {
+	for {
+		select {
+		case nodePort := <-dc.heartbeatListener:
+			dc.activeNodes[nodePort] = true
+			fmt.Println("Node", nodePort, "is up!")
+		case <-time.After(10 * time.Second):
+			for nodePort := range dc.activeNodes {
+				if !dc.activeNodes[nodePort] {
+					fmt.Println("Node", nodePort, "is down!")
+					delete(dc.activeNodes, nodePort)
+				} else {
+					dc.activeNodes[nodePort] = false
+				}
+			}
+		}
 	}
 }
 
 func (dc *DistributedCache) AddNode(address string) {
-	node := NewCacheNode()
+	node := NewCacheNode(dc)
 	node.port = address
-	dc.hashring.AddNde(address)
+	dc.hashring.AddNode(address)
 	dc.nodes[address] = node
 	go node.Start()
+	go node.heartBeat()
 }
 
 func (dc *DistributedCache) Set(key, value string) {
@@ -40,6 +65,11 @@ func main() {
 	dc.AddNode(":3100")
 	dc.AddNode(":3101")
 	dc.AddNode(":3102")
+	go dc.ListenToHeartbeat()
+	go func() {
+		time.Sleep(10 * time.Second)
+		dc.nodes[":3100"].Stop()
+	}()
 	http.HandleFunc("/cache", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:

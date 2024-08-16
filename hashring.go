@@ -19,7 +19,7 @@ func NewHashRing(numReplicas int) *HashRing {
 	}
 }
 
-func (hr *HashRing) AddNde(node string) {
+func (hr *HashRing) AddNode(node string) {
 	for i := 0; i < hr.numReplicas; i++ {
 		hash := int(crc32.ChecksumIEEE([]byte(node + strconv.Itoa(i))))
 		hr.nodes=append(hr.nodes, hash)
